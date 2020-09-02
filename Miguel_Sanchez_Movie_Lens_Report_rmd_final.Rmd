@@ -1,0 +1,323 @@
+---
+title: "Miguel_Sanchez_Movie_Lens_report_rmd_final"
+author: "Miguel Sanchez"
+date: "September 05-2020"
+output: 
+  pdf_document: default 
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies, stringsAsFactors=TRUE) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                                                  title = as.character(title),
+                                                                  genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding")
+# if using R 3.5 or earlier, use `set.seed(1)` instead
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+save(edx, validation, file="movielens-masu.rda")
+
+##################################################################
+# Checking and validating the loaded data
+##################################################################
+
+load(file="movielens-masu.rda")
+
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+## Context
+
+Machine Learning is a subset of Data Science and it´s becoming a strategic piece of digital transformation processes.
+
+Predictive algorithms provide additional insights to make better decisions and will enable proactive actions on a prticular business pain point.
+
+I have implemented a system to predict movie ratings, using provided data sets (Movie Lens) that includes data regarding users, ratings and movies variables.This exercise is intended to demonstrate the usage and power of predictive algorithms.
+
+This report is composed of four parts: the context has provided an introduction and presented the problem, the summary describes the dataset and some transformations performed to split the training/test set; the methods describes the model and its implementation in the attached R file; finally the conclusion shares the results.
+
+##Summary
+
+EDX Data set structure and sample data
+```{r initial_exploration1, echo=TRUE}
+head(edx)
+```
+Data Set (sample) with 6 variables
+```{r initial_exploration2, echo=TRUE}
+cat("Train set dimension :",dim(edx))
+```
+Data set with 9.000.055 records and 6 variables
+```{r initial_exploration3, echo=TRUE}
+str(edx) 
+```
+2 categorical and 4 continuous variables
+
+#Number of unique movies
+```{r initial_exploration4, echo=TRUE}
+unique_movies<- edx$movieId %>% unique() %>% length()
+unique_movies
+```
+#Number of unique users
+```{r initial_exploration5, echo=TRUE}
+unique_users<- edx$userId %>% unique() %>% length()
+unique_users
+```
+#Movies with most ratings
+```{r initial_exploration6, echo=TRUE}
+edx %>% group_by(movieId) %>%
+  summarise(n_ratings=n(), title=first(title)) %>%
+  top_n(10, n_ratings)
+```
+#Histogram of number of reviews for each movie
+```{r initial_exploration7, echo=TRUE}
+edx %>%
+  group_by(movieId) %>%
+  summarise(n_reviews=n()) %>%
+  ggplot(aes(n_reviews)) +
+  geom_histogram(color="red") +
+  scale_x_log10()
+```
+###Data Wrangling
+
+Data sets Management:
+In order to deal with test and train data, the EDX data set will be splitted; considering 70% for
+training and 30% for test.
+```{r initial_exploration8, echo=TRUE}
+set.seed(1, sample.kind="Rounding")
+test_index <- createDataPartition(y = edx$rating, times = 1, p = 0.3, list = FALSE)
+train_data_set <- edx[-test_index,]
+temporal <- edx[test_index,]
+
+test_data_set <- temporal %>% 
+  semi_join(train_data_set, by = "movieId") %>%
+  semi_join(train_data_set, by = "userId")
+
+borrar <- anti_join(temporal, test_data_set)
+train_data_set <- rbind(train_data_set, borrar)
+
+rm(test_index, temporal, borrar)
+```
+#Checking number of records for test data set - 30%
+```{r initial_exploration9, echo=TRUE}
+dim(test_data_set)
+```
+#Checking number of records for training data set - 70%
+```{r initial_exploration10, echo=TRUE}
+dim(train_data_set)
+```
+
+
+For model evaluation we will be using RMSE
+![](C:/Personal_Miguel/Harvard_Data_science/Proyecto_Final/Movie_Lens/data/Images/RMSE.png)
+
+##Methods 1
+Machine Learning Model:
+A linear model will be used for prediction;only Movie and User variables are being considered (due to performace in my laptop)
+movie effect = bi & bu = user effect
+![](C:/Personal_Miguel/Harvard_Data_science/Proyecto_Final/Movie_Lens/data/Images/Linear_Model.png)
+
+For comparison purposes I will use the mean as the first prediction and calculate the RMSE (only Mu)
+![](C:/Personal_Miguel/Harvard_Data_science/Proyecto_Final/Movie_Lens/data/Images/Linear_Model_step1.png)
+
+```{r method1, echo=TRUE}
+mu<- mean(train_data_set$rating)
+rmse_initial<-sqrt(mean((test_data_set$rating - mu)^2))
+rmse_initial
+```
+I will try now with movie effect --> bi
+![](C:/Personal_Miguel/Harvard_Data_science/Proyecto_Final/Movie_Lens/data/Images/Linear_Model_step2.png)
+
+```{r method2, echo=TRUE}
+bi<- train_data_set %>% 
+  group_by(movieId) %>% 
+  summarize(b_i = mean(rating - mu))
+```
+Predicting the rating using mu + bi
+```{r method3, echo=TRUE}
+y_hat_bi <- mu + test_data_set %>% 
+  left_join(bi, by = "movieId") %>% 
+  .$b_i
+#y_hat_bi
+```
+Calculate the RMSE using mu + bi
+```{r method4, echo=TRUE}
+rmse_mu_bi<- sqrt(mean((test_data_set$rating - y_hat_bi)^2))
+rmse_mu_bi
+```
+Including the user effect -->bu
+![](C:/Personal_Miguel/Harvard_Data_science/Proyecto_Final/Movie_Lens/data/Images/Linear_Model_step3.png)
+
+```{r method5, echo=TRUE}
+bu <- train_data_set %>% 
+  left_join(bi, by = 'movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+
+``` 
+  
+Predicting the rating using mu + bi + bu
+```{r method6, echo=TRUE}
+y_hat_bi_bu <- test_data_set %>% 
+  left_join(bi, by='movieId') %>%
+  left_join(bu, by='userId') %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  .$pred
+#y_hat_bi_bu
+``` 
+Calculate the RMSE using mu + bi +bu
+```{r method7, echo=TRUE}
+rmse_mu_bi_bu<- sqrt(mean((test_data_set$rating - y_hat_bi_bu)^2))
+rmse_mu_bi_bu
+```
+##Observation
+Based on the results I have gotten from the algorithm, the RMSE has been reduced reduced thus the prediction has improved
+```{r method8, echo=TRUE}
+EVALUATION<- c("RMSE_MU", "RMSE_MU+BI", "RMSE_MU+BI+BU")
+#result
+VALUES<- c(rmse_initial, rmse_mu_bi, rmse_mu_bi_bu)
+#result2
+Result3<- data.frame(EVALUATION, VALUES)
+Result3
+```
+It´s now time to process against the validation data set
+```{r method9, echo=TRUE}
+mu_v2<- mean(train_data_set$rating)
+rmse_initial_v2<-sqrt(mean((validation$rating - mu)^2))
+rmse_initial_v2
+
+bi_v2<- train_data_set %>% 
+  group_by(movieId) %>% 
+  summarize(b_i_v2 = mean(rating - mu))
+
+y_hat_bi_v2 <- mu_v2 + validation %>% 
+  left_join(bi_v2, by = "movieId") %>% 
+  .$b_i_v2
+#y_hat_bi_v2
+
+rmse_mu_bi_v2<- sqrt(mean((validation$rating - y_hat_bi_v2)^2))
+rmse_mu_bi_v2
+
+bu_v2 <- train_data_set %>% 
+  left_join(bi_v2, by = 'movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u_v2 = mean(rating - mu_v2 - b_i_v2))
+
+y_hat_bi_bu_v2 <- validation %>% 
+  left_join(bi_v2, by='movieId') %>%
+  left_join(bu_v2, by='userId') %>%
+  mutate(pred = mu_v2 + b_i_v2 + b_u_v2) %>%
+  .$pred
+#y_hat_bi_bu_v2
+
+rmse_mu_bi_bu_v2<- sqrt(mean((validation$rating - y_hat_bi_bu_v2)^2))
+```
+#Preliminary Results
+Results obtained processing against validation Data Set
+```{r method10, echo=TRUE}
+rmse_mu_bi_bu_v2
+```
+The results are good, but I believe the RMSE can be improved using the linear model with regularisation 
+##Methods 2
+A linear model with regularisation will be implemented.The first step is to calculate the best lambda
+```{r method11, echo=TRUE}
+lambdas <- seq(from=0, to=10, by=0.25)
+```
+Calculate the RMSE on each defined LAMBDA, using MU+BI+BU
+```{r method12, echo=TRUE}
+rmses <- sapply(lambdas, function(l){
+  # calculate average (MU)
+  mu_v3 <- mean(edx$rating)
+  # calculate the bi
+  b_i_v3 <- edx %>% 
+    group_by(movieId) %>%
+    summarize(b_i_v3 = sum(rating - mu_v3)/(n()+l))
+  # calculate the bu 
+  b_u_v3 <- edx %>% 
+    left_join(b_i_v3, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u_v3 = sum(rating - b_i_v3 - mu_v3)/(n()+l))
+  # Run the predictions on validation data set
+  predicted_ratings <- validation %>% 
+    left_join(b_i_v3, by = "movieId") %>%
+    left_join(b_u_v3, by = "userId") %>%
+    mutate(pred_v3 = mu_v3 + b_i_v3 + b_u_v3) %>%
+    pull(pred_v3)
+  # Print RMSE on predictions 
+  return(RMSE(predicted_ratings, validation$rating))
+})
+```
+Plot of RMSE vs lambdas
+```{r method13, echo=TRUE}
+qplot(lambdas, rmses)
+```
+Minimum RMSE
+```{r method14, echo=TRUE}
+min(rmses)
+```
+LAMBDAS
+```{r method15, echo=TRUE}
+lambda <- lambdas[which.min(rmses)]
+print (lambda)
+```
+Exceution -- Model with regularized movie -->BI and user effect --> BU
+Linear model with the minimizing lambda
+```{r method16, echo=TRUE}
+# Calculate the mean (MU)
+mu_v4 <- mean(edx$rating)
+# Calculate the BI
+b_i_v4 <- edx %>% 
+  group_by(movieId) %>%
+  summarize(b_i_v4 = sum(rating - mu_v4)/(n()+lambda))
+# Calculate the BU 
+b_u_v4 <- edx %>% 
+  left_join(b_i_v4, by="movieId") %>%
+  group_by(userId) %>%
+  summarize(b_u_v4 = sum(rating - b_i_v4 - mu_v4)/(n()+lambda))
+# Run predictions using calculated BI & BU
+predicted_ratings <- validation %>% 
+  left_join(b_i_v4, by = "movieId") %>%
+  left_join(b_u_v4, by = "userId") %>%
+  mutate(pred = mu_v4 + b_i_v4 + b_u_v4) %>%
+  pull(pred)
+```
+output RMSE of predictions
+```{r method17, echo=TRUE}
+RMSE(predicted_ratings, validation$rating)
+```
+##Conslusion / Results
+The linear model considering movie (BI) anf user effects (BU) created an acceptable resut; however,the result was improved (< 0.86490) using regularisation
